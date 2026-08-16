@@ -13,6 +13,8 @@ interface OrderLine {
   amount: number;
   unit: string;
   totalPrice: number;
+  commodityGroupId?: number | null;
+  commodityGroupName?: string | null;
 }
 
 export default function NewRequestPage() {
@@ -424,16 +426,28 @@ export default function NewRequestPage() {
                     />
                   </div>
 
-                  <div className="mt-2 text-right">
-                    <span className="text-sm text-gray-600">Total: </span>
-                    <span className="text-lg font-semibold tracking-tight text-ink">
-                      €{line.totalPrice.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                   <div className="mt-4 space-y-2">
+                     {/* Display per-item commodity group only if it differs from request-level */}
+                     {line.commodityGroupId && line.commodityGroupId !== commodityGroupId && (
+                       <div className="flex items-center gap-2">
+                         <span className="text-xs text-gray-600">Mapped to:</span>
+                         <span className="inline-flex px-2.5 py-1 rounded-full bg-accent-soft/30 text-accent-deep font-medium text-sm">
+                           {line.commodityGroupId} - {line.commodityGroupName}
+                         </span>
+                       </div>
+                     )}
+                     
+                     <div className="text-right">
+                       <span className="text-sm text-gray-600">Total: </span>
+                       <span className="text-lg font-semibold tracking-tight text-ink">
+                         €{line.totalPrice.toFixed(2)}
+                       </span>
+                     </div>
+                   </div>
+                 </div>
+               ))}
+             </div>
+           )}
         </div>
 
         {/* Total Cost */}

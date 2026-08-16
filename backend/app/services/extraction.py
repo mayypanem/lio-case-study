@@ -41,8 +41,9 @@ Please extract the following information:
    - Amount (Menge/Quantity/Anzahl)
    - Unit (Einheit/Unit/ME - e.g., "licenses", "pieces", "Stück", "items")
    - Total Price (Gesamtpreis/Total/Gesamt)
+   - Commodity Group ID & Name for THIS ITEM (see Step 7 below)
 6. Total Cost (Gesamtsumme/Total Cost/Total Offer Cost)
-7. Commodity Group Classification - Select the SINGLE most appropriate commodity group from the list below
+7. Commodity Group Classification for each item - Select the most appropriate commodity group for EACH item from the list below
 
 Available Commodity Groups (ID | Category | Name):
 {commodity_groups_list}
@@ -53,7 +54,7 @@ IMPORTANT INSTRUCTIONS:
 - For unit prices and totals, extract only the numeric value (remove currency symbols)
 - For the unit field, translate German terms to English (e.g., "Stück" -> "pieces", "Lizenzen" -> "licenses")
 - Be careful with German number formatting (e.g., "1.438,00" = 1438.00)
-- For classification, consider the PRIMARY nature and purpose of the items:
+- For commodity group classification of each item, consider its PRIMARY nature and purpose:
   * Branded office decor/furniture → Office Equipment (15)
   * Traditional promotional items (brochures, giveaways, banners) → Promotional Materials (43)
   * Software/IT products → Software (31) or IT Services (30)
@@ -67,22 +68,22 @@ IMPORTANT INSTRUCTIONS:
             for keyword, group_id in org_mappings.items()
         )
         prompt += f"""
-8. Custom Commodity Group Classification (Organization-Specific Overrides)
-This organization has specific business requirements for certain item types:
+8. Custom Commodity Group Classification for Items (Organization-Specific Overrides)
+This organization has specific business requirements for certain item types. For items whose descriptions match the keywords below, use the mapped commodity group instead of the Step 7 classification:
 
 {mappings_list}
 
-CUSTOM CLASSIFICATION RULES:
-- Search the extracted information (title, department, item descriptions) for keywords that match these mappings (case-insensitive substring matching)
-- If ANY keyword is found, use the mapped commodity group ID instead of Step 7 classification
-- Custom mappings take PRIORITY over Step 7 classification
-- Only use a mapped group if the keyword appears in the extracted data
-- If no keyword matches, use the Step 7 classification
+CUSTOM CLASSIFICATION RULES FOR ITEMS:
+- For EACH item, search its description for keywords that match these mappings (case-insensitive substring matching)
+- If an item's description contains a matching keyword, use the mapped commodity group ID for that item
+- Custom mappings take PRIORITY over Step 7 classification for matching items
+- Only use a mapped group if the keyword appears in the item's description
+- Items that don't match any keyword should use the Step 7 classification
 
 Examples:
-- If items include "cable ties", use the mapped group instead of AI classification
-- If items include "printer toner", use the mapped group instead of AI classification
-- If items don't match any keyword, use Step 7 classification normally
+- If an item description includes "cable ties", assign it the mapped group for "cable ties" instead of AI classification
+- If an item description includes "printer toner", assign it the mapped group for "printer toner" instead of AI classification
+- If an item doesn't match any keyword, use Step 7 classification normally for that item
 """
 
     prompt += """
@@ -98,7 +99,9 @@ Return ONLY valid JSON in this exact format (no markdown, no code blocks):
       "unitPrice": 150.00,
       "amount": 10,
       "unit": "licenses",
-      "totalPrice": 1500.00
+      "totalPrice": 1500.00,
+      "commodityGroupId": 15,
+      "commodityGroupName": "Office Equipment"
     }
   ],
   "totalCost": 1500.00,
@@ -214,10 +217,12 @@ def extract_vendor_data(
     if not extracted.commodity_group_id or not extracted.commodity_group_name:
         missing_fields.append("Commodity Group")
 
-    # Validate that the returned commodity group id actually exists.
+     # Build a lookup map from commodity group ID to group object
+    commodity_group_map = {g.id: g for g in commodity_groups}
+    
+    # Validate and resolve commodity group names for request-level group.
     if extracted.commodity_group_id is not None:
-        valid_ids = {g.id for g in commodity_groups}
-        if extracted.commodity_group_id not in valid_ids:
+        if extracted.commodity_group_id not in commodity_group_map:
             logger.warning(
                 "Invalid commodity group ID returned: %s", extracted.commodity_group_id
             )
@@ -225,6 +230,25 @@ def extract_vendor_data(
             extracted.commodity_group_name = None
             if "Commodity Group" not in missing_fields:
                 missing_fields.append("Commodity Group")
+        else:
+            # Look up the name from the database instead of trusting AI
+            group = commodity_group_map[extracted.commodity_group_id]
+            extracted.commodity_group_name = group.name
+    
+    # Validate and resolve per-item commodity groups (from Step 8 overrides or Step 7 baseline).
+    for line in extracted.order_lines:
+        if line.commodity_group_id is not None:
+            if line.commodity_group_id not in commodity_group_map:
+                logger.warning(
+                    "Invalid item commodity group ID returned: %s", line.commodity_group_id
+                )
+                # Fall back to request-level commodity group
+                line.commodity_group_id = extracted.commodity_group_id
+                line.commodity_group_name = extracted.commodity_group_name
+            else:
+                # Look up the name from the database instead of trusting AI
+                group = commodity_group_map[line.commodity_group_id]
+                line.commodity_group_name = group.name
 
     return ExtractionResponse(
         success=True,

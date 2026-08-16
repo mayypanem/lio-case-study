@@ -63,6 +63,8 @@ export interface OrderLineInput {
   amount: number;
   unit: string;
   totalPrice: number;
+  commodityGroupId?: number | null;
+  commodityGroupName?: string | null;
 }
 
 export interface CreateRequestInput {

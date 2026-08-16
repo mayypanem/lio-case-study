@@ -50,11 +50,11 @@ export default function OrganizationPage() {
        ]);
        setMembers(result.members);
        setInvites(result.invites);
-       setRequiredFields(settings.required_fields);
-       const hasMappingsData = !!(settings.commodity_group_mappings && 
-         Object.keys(settings.commodity_group_mappings).length > 0);
-       setHasMappings(hasMappingsData);
-       setEnableCustomMappings(hasMappingsData);
+        setRequiredFields(settings.required_fields);
+        const hasMappingsData = !!(settings.commodity_group_mappings && 
+          Object.keys(settings.commodity_group_mappings).length > 0);
+        setHasMappings(hasMappingsData);
+        setEnableCustomMappings(settings.enable_commodity_group_mappings);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load organization');
     }
@@ -324,11 +324,12 @@ export default function OrganizationPage() {
                       setError('');
                       setSuccess('');
                       try {
+                        // Get current settings to preserve mappings
+                        const currentSettings = await api.organizations.getSettings();
                         await api.organizations.updateSettings({
                           required_fields: requiredFields,
                           enable_commodity_group_mappings: e.target.checked,
-                          commodity_group_mappings: hasMappings ? 
-                            (await api.organizations.getSettings()).commodity_group_mappings : {}
+                          commodity_group_mappings: currentSettings.commodity_group_mappings || {}
                         });
                         setSuccess(e.target.checked ? 'Custom mappings enabled' : 'Custom mappings disabled');
                       } catch (err) {

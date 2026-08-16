@@ -19,6 +19,8 @@ class OrderLineData(BaseModel):
     amount: float = 0
     unit: str = ""
     total_price: float = Field(default=0, alias="totalPrice")
+    commodity_group_id: int | None = Field(default=None, alias="commodityGroupId")
+    commodity_group_name: str | None = Field(default=None, alias="commodityGroupName")
 
 
 class ExtractedVendorData(BaseModel):
