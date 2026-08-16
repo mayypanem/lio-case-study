@@ -597,6 +597,150 @@ def test_articles_catalog_paginated_and_searchable():
     assert client.get("/articles", headers=_auth(other)).json()["total"] == 0
 
 
+def test_supplier_match_vat_and_name():
+    token = _signin("admin@acme.com")
+
+    # Find a real seeded supplier to match against.
+    suppliers = client.get("/suppliers?limit=500", headers=_auth(token)).json()
+    target = next(s for s in suppliers if s["vat_id"])
+
+    # exact VAT match wins with score 1.0, regardless of name typos.
+    r = client.get(
+        "/suppliers/match",
+        params={"name": "Totally Different Name", "vat_id": target["vat_id"]},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    matches = r.json()["matches"]
+    assert matches[0]["supplier"]["id"] == target["id"]
+    assert matches[0]["score"] == 1.0
+    assert matches[0]["match_type"] == "vat"
+
+    # VAT id is compared case/whitespace-insensitively.
+    r = client.get(
+        "/suppliers/match",
+        params={"vat_id": f"  {target['vat_id'].lower()}  "},
+        headers=_auth(token),
+    )
+    assert any(m["supplier"]["id"] == target["id"] for m in r.json()["matches"])
+
+    # fuzzy name match (no VAT supplied) finds the supplier from a near-exact name.
+    r = client.get(
+        "/suppliers/match",
+        params={"name": target["name"]},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    matches = r.json()["matches"]
+    assert matches[0]["supplier"]["id"] == target["id"]
+    assert matches[0]["match_type"] == "name"
+    assert matches[0]["score"] >= 0.99
+
+    # unrelated vendor name -> no matches above threshold
+    r = client.get(
+        "/suppliers/match",
+        params={"name": "Zzzzzzz Qqqqqqq Totally Unrelated Vendor Inc"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["matches"] == []
+
+    # no name and no vat -> empty result, not an error
+    r = client.get("/suppliers/match", headers=_auth(token))
+    assert r.status_code == 200
+    assert r.json()["matches"] == []
+
+    # results capped at 5 and org-scoped: another tenant sees nothing
+    other = _signin("admin@walmart.com")
+    r = client.get(
+        "/suppliers/match", params={"name": target["name"]}, headers=_auth(other)
+    )
+    assert r.json()["matches"] == []
+
+
+def test_article_match_scoped_to_supplier():
+    token = _signin("admin@acme.com")
+
+    suppliers = client.get("/suppliers?limit=500", headers=_auth(token)).json()
+    target_supplier = suppliers[0]
+    other_supplier = suppliers[1]
+
+    articles = client.get(
+        f"/articles?supplier_id={target_supplier['id']}&limit=50",
+        headers=_auth(token),
+    ).json()["items"]
+    assert articles, "seeded supplier should have at least one article"
+    sample = articles[0]
+
+    # exact description text -> top match is that same article, recommended.
+    r = client.post(
+        "/articles/match",
+        json={
+            "supplierId": target_supplier["id"],
+            "lines": [{"index": 0, "description": sample["description"]}],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    matches = r.json()["matches"]["0"]
+    assert matches[0]["article"]["id"] == sample["id"]
+    assert matches[0]["recommended"] is True
+    assert matches[0]["score"] >= 0.99
+
+    # matching is restricted to the given supplier: searching under a
+    # different supplier never returns this article even with the exact text.
+    r = client.post(
+        "/articles/match",
+        json={
+            "supplierId": other_supplier["id"],
+            "lines": [{"index": 0, "description": sample["description"]}],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    other_ids = {m["article"]["id"] for m in r.json()["matches"]["0"]}
+    assert sample["id"] not in other_ids
+
+    # unrelated gibberish description -> no matches above threshold
+    r = client.post(
+        "/articles/match",
+        json={
+            "supplierId": target_supplier["id"],
+            "lines": [{"index": 0, "description": "zzzzz qqqqq xxxxx unrelated"}],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["matches"]["0"] == []
+
+    # batch: multiple lines keyed by their original index
+    r = client.post(
+        "/articles/match",
+        json={
+            "supplierId": target_supplier["id"],
+            "lines": [
+                {"index": 5, "description": sample["description"]},
+                {"index": 2, "description": "zzzzz qqqqq xxxxx unrelated"},
+            ],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    body = r.json()["matches"]
+    assert set(body.keys()) == {"5", "2"}
+    assert body["5"][0]["article"]["id"] == sample["id"]
+    assert body["2"] == []
+
+    # unknown/empty catalog supplier -> no matches, not an error
+    r = client.post(
+        "/articles/match",
+        json={"supplierId": str(uuid.uuid4()), "lines": [{"index": 0, "description": "x"}]},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["matches"]["0"] == []
+
+
 def test_seed_is_idempotent():
     # The DB was already seeded at import; seeding again must add nothing and
     # must not change the row counts (safe to run on every startup).

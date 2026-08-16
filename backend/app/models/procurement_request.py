@@ -96,8 +96,16 @@ class OrderLine(Base, CreatedAtMixin):
     unit: Mapped[str] = mapped_column(Text, nullable=False)
     total_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     line_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    commodity_group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("commodity_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    article_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("articles.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     request: Mapped["ProcurementRequest"] = relationship(back_populates="order_lines")
+    commodity_group: Mapped["CommodityGroup | None"] = relationship()
+    article: Mapped["Article | None"] = relationship()
 
 
 class RequestActivity(Base, CreatedAtMixin):
@@ -142,3 +150,4 @@ class RequestDocument(Base, CreatedAtMixin):
 
 # Imported for the type-only forward reference in relationships above.
 from app.models.commodity_group import CommodityGroup  # noqa: E402,F401
+from app.models.article import Article  # noqa: E402,F401

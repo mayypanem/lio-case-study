@@ -39,3 +39,27 @@ class ArticlePage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class ArticleMatchLine(BaseModel):
+    """One order line to match against a supplier's catalog."""
+
+    index: int
+    description: str
+
+
+class ArticleMatchRequest(BaseModel):
+    supplier_id: uuid.UUID = Field(alias="supplierId")
+    lines: list[ArticleMatchLine]
+
+
+class ArticleMatch(BaseModel):
+    article: ArticleOut
+    score: float
+    recommended: bool
+
+
+class ArticleMatchResponse(BaseModel):
+    """Keyed by the order line's index (as a string, JSON object requirement)."""
+
+    matches: dict[str, list[ArticleMatch]]

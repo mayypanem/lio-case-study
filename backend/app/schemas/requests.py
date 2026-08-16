@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.articles import ArticleOut
+
 RequestStatus = Literal["open", "in_progress", "closed"]
 ApprovalStatus = Literal["pending", "approved", "rejected"]
 
@@ -18,6 +20,8 @@ class OrderLineIn(BaseModel):
     amount: float
     unit: str
     total_price: float = Field(alias="totalPrice")
+    commodity_group_id: int | None = Field(default=None, alias="commodityGroupId")
+    article_id: uuid.UUID | None = Field(default=None, alias="articleId")
 
 
 class RequestCreate(BaseModel):
@@ -73,7 +77,11 @@ class OrderLineOut(BaseModel):
     unit: str
     total_price: float
     line_order: int
+    commodity_group_id: int | None
+    article_id: uuid.UUID | None
     created_at: datetime
+    commodity_group: CommodityGroupOut | None = None
+    article: ArticleOut | None = None
 
 
 class RequestActivityOut(BaseModel):

@@ -65,6 +65,19 @@ export type ProcurementRequest = {
   updated_at: string;
 };
 
+export type OrderLineArticle = {
+  id: string;
+  article_number: string;
+  supplier_id: string;
+  supplier_name: string | null;
+  description: string;
+  unit_price: string;
+  currency: string;
+  unit: string;
+  quantity: string;
+  created_at: string;
+};
+
 export type OrderLine = {
   id: string;
   request_id: string;
@@ -74,7 +87,11 @@ export type OrderLine = {
   unit: string;
   total_price: number;
   line_order: number;
+  commodity_group_id: number | null;
+  article_id: string | null;
   created_at: string;
+  commodity_group?: CommodityGroup | null;
+  article?: OrderLineArticle | null;
 };
 
 // ============================================================================

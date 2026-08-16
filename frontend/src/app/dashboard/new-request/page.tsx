@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import * as api from '@/lib/api';
@@ -15,6 +15,64 @@ interface OrderLine {
   totalPrice: number;
   commodityGroupId?: number | null;
   commodityGroupName?: string | null;
+  articleId?: string | null;
+}
+
+// Fields that, once manually edited, invalidate a previously applied catalog
+// article match (treated as a deliberate override). Editing amount/quantity
+// alone keeps the link, since the negotiated unit price still applies.
+const FIELDS_THAT_CLEAR_ARTICLE_LINK = new Set(['positionDescription', 'unitPrice', 'unit']);
+
+function MatchRow({
+  match,
+  onConfirm,
+}: {
+  match: api.SupplierMatch;
+  onConfirm: (match: api.SupplierMatch) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <div className="min-w-0">
+        <p className="text-sm text-ink truncate">
+          {match.supplier.name}
+          {match.supplier.vat_id && (
+            <span className="text-ink/45"> · {match.supplier.vat_id}</span>
+          )}
+        </p>
+        <p className="text-xs text-ink/45">
+          {match.match_type === 'vat' ? 'Matched by VAT ID' : `${Math.round(match.score * 100)}% name match`}
+        </p>
+      </div>
+      <Button type="button" size="sm" variant="outline" onClick={() => onConfirm(match)}>
+        Confirm
+      </Button>
+    </div>
+  );
+}
+
+function ArticleMatchRow({
+  match,
+  onApply,
+}: {
+  match: api.ArticleMatch;
+  onApply: (match: api.ArticleMatch) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <div className="min-w-0">
+        <p className="text-sm text-ink truncate">
+          {match.article.article_number} — {match.article.description}
+        </p>
+        <p className="text-xs text-ink/45">
+          €{parseFloat(match.article.unit_price).toFixed(2)} / {match.article.unit} ·{' '}
+          {Math.round(match.score * 100)}% match
+        </p>
+      </div>
+      <Button type="button" size="sm" variant="outline" onClick={() => onApply(match)}>
+        Apply
+      </Button>
+    </div>
+  );
 }
 
 export default function NewRequestPage() {
@@ -37,6 +95,97 @@ export default function NewRequestPage() {
   const [success, setSuccess] = useState('');
   const [warning, setWarning] = useState('');
   const [extracting, setExtracting] = useState(false);
+
+  // --- Catalog article matching (negotiated prices) ---
+  // A confirmed supplier scopes article matching to that supplier's catalog only.
+  const [confirmedSupplier, setConfirmedSupplier] = useState<api.Supplier | null>(null);
+  const [supplierMatches, setSupplierMatches] = useState<api.SupplierMatch[]>([]);
+  const [supplierMatchLoading, setSupplierMatchLoading] = useState(false);
+  const [showAllSupplierMatches, setShowAllSupplierMatches] = useState(false);
+  const [vendorMatchDismissed, setVendorMatchDismissed] = useState(false);
+
+  const [articleMatches, setArticleMatches] = useState<Record<number, api.ArticleMatch[]>>({});
+  const [articleMatchLoading, setArticleMatchLoading] = useState(false);
+  const [expandedLineMatches, setExpandedLineMatches] = useState<Record<number, boolean>>({});
+
+  // Debounced vendor match lookup whenever the (unconfirmed) vendor name/VAT changes.
+  useEffect(() => {
+    if (confirmedSupplier) return; // already confirmed, no need to keep searching
+    if (!vendorName.trim() && !vatId.trim()) {
+      setSupplierMatches([]);
+      return;
+    }
+    setVendorMatchDismissed(false);
+    const handle = setTimeout(async () => {
+      setSupplierMatchLoading(true);
+      try {
+        const { matches } = await api.suppliers.match({ name: vendorName, vatId });
+        setSupplierMatches(matches);
+      } catch {
+        setSupplierMatches([]);
+      }
+      setSupplierMatchLoading(false);
+    }, 500);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendorName, vatId, confirmedSupplier]);
+
+  // Debounced article match lookup for every line, scoped to the confirmed supplier.
+  useEffect(() => {
+    if (!confirmedSupplier || orderLines.length === 0) {
+      setArticleMatches({});
+      return;
+    }
+    const handle = setTimeout(async () => {
+      const lines = orderLines
+        .map((l, index) => ({ index, description: l.positionDescription }))
+        .filter((l) => l.description.trim().length > 0);
+      if (lines.length === 0) {
+        setArticleMatches({});
+        return;
+      }
+      setArticleMatchLoading(true);
+      try {
+        const { matches } = await api.articles.match({
+          supplierId: confirmedSupplier.id,
+          lines,
+        });
+        const byIndex: Record<number, api.ArticleMatch[]> = {};
+        for (const [key, value] of Object.entries(matches)) {
+          byIndex[Number(key)] = value;
+        }
+        setArticleMatches(byIndex);
+      } catch {
+        setArticleMatches({});
+      }
+      setArticleMatchLoading(false);
+    }, 500);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmedSupplier, orderLines.map((l) => l.positionDescription).join('|')]);
+
+  const confirmSupplierMatch = (match: api.SupplierMatch) => {
+    setConfirmedSupplier(match.supplier);
+    setVendorName(match.supplier.name);
+    if (match.supplier.vat_id) setVatId(match.supplier.vat_id);
+    setSupplierMatches([]);
+  };
+
+  const applyArticleMatch = (index: number, match: api.ArticleMatch) => {
+    const updated = [...orderLines];
+    const unitPrice = parseFloat(match.article.unit_price);
+    updated[index] = {
+      ...updated[index],
+      positionDescription: match.article.description,
+      unitPrice,
+      unit: match.article.unit,
+      totalPrice: unitPrice * updated[index].amount,
+      articleId: match.article.id,
+    };
+    setOrderLines(updated);
+    setTotalCost(updated.reduce((sum, line) => sum + line.totalPrice, 0));
+    setExpandedLineMatches((prev) => ({ ...prev, [index]: false }));
+  };
 
   // PDF parsing mutation
   const parsePDFMutation = useMutation({
@@ -124,17 +273,24 @@ export default function NewRequestPage() {
   };
 
   // Update order line
-  const updateOrderLine = (index: number, field: keyof OrderLine, value: string | number) => {
+  const updateOrderLine = (index: number, field: keyof OrderLine, value: string | number | null) => {
     const updated = [...orderLines];
     updated[index] = { ...updated[index], [field]: value };
-    
+
     // Auto-calculate total price
     if (field === 'unitPrice' || field === 'amount') {
       updated[index].totalPrice = updated[index].unitPrice * updated[index].amount;
     }
-    
+
+    // Manually editing a field that was used to apply a catalog match treats
+    // the edit as a deliberate override — unlink the article so pricing/audit
+    // no longer claims it came from the catalog. Amount-only edits keep the link.
+    if (updated[index].articleId && FIELDS_THAT_CLEAR_ARTICLE_LINK.has(field)) {
+      updated[index].articleId = null;
+    }
+
     setOrderLines(updated);
-    
+
     // Update total cost
     const newTotal = updated.reduce((sum, line) => sum + line.totalPrice, 0);
     setTotalCost(newTotal);
@@ -354,6 +510,71 @@ export default function NewRequestPage() {
           </div>
         </div>
 
+        {/* Vendor Match Banner - shows only if no supplier confirmed yet */}
+        {!confirmedSupplier && !vendorMatchDismissed && (supplierMatches.length > 0 || supplierMatchLoading) && (
+          <div className="lio-card p-4 bg-accent-soft/20 border border-accent/40">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div>
+                <h3 className="text-sm font-semibold text-ink mb-1">
+                  {supplierMatchLoading ? 'Searching catalog...' : 'Matching supplier found'}
+                </h3>
+                <p className="text-xs text-ink/60">
+                  {supplierMatchLoading
+                    ? 'Looking for vendors matching your input...'
+                    : `Found ${supplierMatches.length} match${supplierMatches.length !== 1 ? 'es' : ''}. Confirm one to unlock negotiated pricing.`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVendorMatchDismissed(true)}
+                className="text-ink/45 hover:text-ink text-lg leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            {!supplierMatchLoading && supplierMatches.length > 0 && (
+              <div className="space-y-1 mt-3">
+                {(showAllSupplierMatches ? supplierMatches : supplierMatches.slice(0, 3)).map((match) => (
+                  <MatchRow key={match.supplier.id} match={match} onConfirm={confirmSupplierMatch} />
+                ))}
+                {supplierMatches.length > 3 && !showAllSupplierMatches && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSupplierMatches(true)}
+                    className="text-xs text-accent-deep hover:underline py-1"
+                  >
+                    Show {supplierMatches.length - 3} more
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Confirmed Supplier Badge */}
+        {confirmedSupplier && (
+          <div className="lio-card p-4 bg-green-50 border border-green-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-ink/60">Confirmed supplier</p>
+                <p className="text-base font-semibold text-ink">{confirmedSupplier.name}</p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setConfirmedSupplier(null);
+                  setArticleMatches({});
+                  setExpandedLineMatches({});
+                }}
+              >
+                Change
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Order Lines */}
         <div className="lio-card p-6">
           <div className="flex items-center justify-between mb-4">
@@ -382,69 +603,121 @@ export default function NewRequestPage() {
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                    <div className="lg:col-span-2">
-                      <Input
-                        label="Description"
-                        value={line.positionDescription}
-                        onChange={(e) =>
-                          updateOrderLine(index, 'positionDescription', e.target.value)
-                        }
-                        required
-                        placeholder="Item description"
-                      />
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+                     <div className="lg:col-span-2">
+                       <Input
+                         label="Description"
+                         value={line.positionDescription}
+                         onChange={(e) =>
+                           updateOrderLine(index, 'positionDescription', e.target.value)
+                         }
+                         required
+                         placeholder="Item description"
+                       />
+                     </div>
+
+                     <Input
+                       label="Unit Price (€)"
+                       type="number"
+                       step="0.01"
+                       value={line.unitPrice}
+                       onChange={(e) =>
+                         updateOrderLine(index, 'unitPrice', parseFloat(e.target.value) || 0)
+                       }
+                       required
+                     />
+
+                     <Input
+                       label="Amount"
+                       type="number"
+                       step="0.01"
+                       value={line.amount}
+                       onChange={(e) =>
+                         updateOrderLine(index, 'amount', parseFloat(e.target.value) || 1)
+                       }
+                       required
+                     />
+
+                     <Input
+                       label="Unit"
+                       value={line.unit}
+                       onChange={(e) => updateOrderLine(index, 'unit', e.target.value)}
+                       required
+                       placeholder="pcs, licenses, etc."
+                     />
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Commodity Group
+                        </label>
+                        <select
+                          value={line.commodityGroupId || ''}
+                          onChange={(e) =>
+                            updateOrderLine(index, 'commodityGroupId', 
+                              e.target.value ? Number(e.target.value) : null)
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-accent-deep/60 focus:border-accent-deep/40"
+                        >
+                          <option value="">
+                            {commodityGroups ? 'Select a commodity group' : 'Loading...'}
+                          </option>
+                          {commodityGroups?.map((group) => (
+                            <option key={group.id} value={group.id}>
+                              {group.id} - {group.category} - {group.name}
+                            </option>
+                          ))}
+                        </select>
+                       </div>
                     </div>
 
-                    <Input
-                      label="Unit Price (€)"
-                      type="number"
-                      step="0.01"
-                      value={line.unitPrice}
-                      onChange={(e) =>
-                        updateOrderLine(index, 'unitPrice', parseFloat(e.target.value) || 0)
-                      }
-                      required
-                    />
-
-                    <Input
-                      label="Amount"
-                      type="number"
-                      step="0.01"
-                      value={line.amount}
-                      onChange={(e) =>
-                        updateOrderLine(index, 'amount', parseFloat(e.target.value) || 1)
-                      }
-                      required
-                    />
-
-                    <Input
-                      label="Unit"
-                      value={line.unit}
-                      onChange={(e) => updateOrderLine(index, 'unit', e.target.value)}
-                      required
-                      placeholder="pcs, licenses, etc."
-                    />
-                  </div>
-
-                   <div className="mt-4 space-y-2">
-                     {/* Display per-item commodity group only if it differs from request-level */}
-                     {line.commodityGroupId && line.commodityGroupId !== commodityGroupId && (
+                     <div className="mt-4 flex items-center justify-between">
                        <div className="flex items-center gap-2">
-                         <span className="text-xs text-gray-600">Mapped to:</span>
-                         <span className="inline-flex px-2.5 py-1 rounded-full bg-accent-soft/30 text-accent-deep font-medium text-sm">
-                           {line.commodityGroupId} - {line.commodityGroupName}
+                         {line.articleId && (
+                           <span className="inline-flex px-2.5 py-1 rounded-full bg-green-100 text-green-800 text-xs font-semibold">
+                             ✓ Catalog article
+                           </span>
+                         )}
+                       </div>
+                       <div className="text-right">
+                         <span className="text-sm text-gray-600">Total: </span>
+                         <span className="text-lg font-semibold tracking-tight text-ink">
+                           €{line.totalPrice.toFixed(2)}
                          </span>
                        </div>
-                     )}
-                     
-                     <div className="text-right">
-                       <span className="text-sm text-gray-600">Total: </span>
-                       <span className="text-lg font-semibold tracking-tight text-ink">
-                         €{line.totalPrice.toFixed(2)}
-                       </span>
                      </div>
-                   </div>
-                 </div>
+
+                     {/* Article Match Suggestions - only if supplier is confirmed */}
+                     {confirmedSupplier && (articleMatches[index]?.length || 0) > 0 && (
+                       <div className="mt-4 pt-4 border-t border-gray-200">
+                         <button
+                           type="button"
+                           onClick={() =>
+                             setExpandedLineMatches((prev) => ({
+                               ...prev,
+                               [index]: !prev[index],
+                             }))
+                           }
+                           className="text-xs font-medium text-accent-deep hover:underline flex items-center gap-1"
+                         >
+                           {expandedLineMatches[index] ? '▼' : '▶'}{' '}
+                           {line.articleId
+                             ? 'Applied article (show alternatives)'
+                             : `${articleMatches[index].length} matching catalog item${articleMatches[index].length !== 1 ? 's' : ''}`}
+                         </button>
+                         {expandedLineMatches[index] && (
+                           <div className="mt-2 space-y-1">
+                             {articleMatches[index].map((match) => (
+                               <ArticleMatchRow
+                                 key={match.article.id}
+                                 match={match}
+                                 onApply={() => applyArticleMatch(index, match)}
+                               />
+                             ))}
+                           </div>
+                         )}
+                       </div>
+                     )}
+                  </div>
                ))}
              </div>
            )}

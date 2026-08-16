@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.deps import get_current_membership, require_buyer_or_admin
 from app.db.session import get_db
 from app.models import (
+    Article,
     CommodityGroup,
     OrderLine,
     Organization,
@@ -44,7 +45,10 @@ _FIELD_LABELS = {
 
 def _load_request_options():
     return (
-        selectinload(ProcurementRequest.order_lines),
+        selectinload(ProcurementRequest.order_lines).selectinload(OrderLine.article),
+        selectinload(ProcurementRequest.order_lines).selectinload(
+            OrderLine.commodity_group
+        ),
         selectinload(ProcurementRequest.commodity_group),
     )
 
@@ -75,6 +79,28 @@ def _validate_commodity_group(db: Session, commodity_group_id: int) -> None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unknown commodity group id: {commodity_group_id}",
+        )
+
+
+def _validate_article_ids(
+    db: Session, organization_id: uuid.UUID, article_ids: set[uuid.UUID]
+) -> None:
+    """Ensure every referenced article exists and belongs to the caller's org."""
+    if not article_ids:
+        return
+    found = set(
+        db.scalars(
+            select(Article.id).where(
+                Article.id.in_(article_ids),
+                Article.organization_id == organization_id,
+            )
+        )
+    )
+    missing = article_ids - found
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown article id(s): {', '.join(str(a) for a in missing)}",
         )
 
 
@@ -183,6 +209,11 @@ def create_request(
 ) -> RequestOut:
     _validate_commodity_group(db, payload.commodity_group_id)
     _enforce_required_fields(db, membership.organization_id, payload)
+    _validate_article_ids(
+        db,
+        membership.organization_id,
+        {line.article_id for line in payload.order_lines if line.article_id},
+    )
 
     # Vendor fields are already cleaned up during extraction, so we can persist
     # them directly here.
@@ -207,6 +238,8 @@ def create_request(
             unit=line.unit,
             total_price=line.total_price,
             line_order=index + 1,
+            commodity_group_id=line.commodity_group_id,
+            article_id=line.article_id,
         )
         for index, line in enumerate(payload.order_lines)
     ]
@@ -229,6 +262,11 @@ def update_request(
     request = _get_org_request(db, request_id, membership.organization_id)
     _validate_commodity_group(db, payload.commodity_group_id)
     _enforce_required_fields(db, membership.organization_id, payload)
+    _validate_article_ids(
+        db,
+        membership.organization_id,
+        {line.article_id for line in payload.order_lines if line.article_id},
+    )
 
     changed = _changed_fields(request, payload)
 
@@ -249,6 +287,8 @@ def update_request(
             unit=line.unit,
             total_price=line.total_price,
             line_order=index + 1,
+            commodity_group_id=line.commodity_group_id,
+            article_id=line.article_id,
         )
         for index, line in enumerate(payload.order_lines)
     ]

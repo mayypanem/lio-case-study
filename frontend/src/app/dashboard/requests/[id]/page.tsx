@@ -259,22 +259,34 @@ export default function RequestDetailPage() {
             </dl>
           </div>
 
-          <div className="lio-card p-6">
-            <h2 className="text-lg font-semibold tracking-tight text-ink mb-4">Order Lines</h2>
-            <div className="space-y-2">
-              {request.order_lines?.map((line, i) => (
-                <div key={line.id} className="flex justify-between items-start bg-ink-800/[0.02] rounded-lg p-3">
-                  <div>
-                    <p className="text-sm font-medium text-ink">{i + 1}. {line.position_description}</p>
-                    <p className="text-sm text-ink/55 mt-0.5">
-                      {line.amount} {line.unit} × {euro(line.unit_price)}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold text-ink">{euro(line.total_price)}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+           <div className="lio-card p-6">
+             <h2 className="text-lg font-semibold tracking-tight text-ink mb-4">Order Lines</h2>
+             <div className="space-y-2">
+               {request.order_lines?.map((line, i) => (
+                 <div key={line.id} className="flex justify-between items-start bg-ink-800/[0.02] rounded-lg p-3">
+                   <div className="flex-1">
+                     <p className="text-sm font-medium text-ink">{i + 1}. {line.position_description}</p>
+                     <p className="text-sm text-ink/55 mt-0.5">
+                       {line.amount} {line.unit} × {euro(line.unit_price)}
+                     </p>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {line.commodity_group_id && (
+                          <span className="inline-flex px-2.5 py-1 rounded-full bg-accent-soft/30 text-accent-deep font-medium text-xs">
+                            {line.commodity_group?.id} - {line.commodity_group?.category}
+                          </span>
+                        )}
+                        {line.article_id && line.article && (
+                          <span className="inline-flex px-2.5 py-1 rounded-full bg-green-100 text-green-800 font-medium text-xs">
+                            ✓ {line.article.article_number}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                   <p className="text-sm font-semibold text-ink">{euro(line.total_price)}</p>
+                 </div>
+               ))}
+             </div>
+           </div>
 
           <div className="lio-card p-6">
             <h2 className="text-lg font-semibold tracking-tight text-ink mb-4">Activity</h2>

@@ -65,6 +65,7 @@ export interface OrderLineInput {
   totalPrice: number;
   commodityGroupId?: number | null;
   commodityGroupName?: string | null;
+  articleId?: string | null;
 }
 
 export interface CreateRequestInput {
@@ -147,6 +148,23 @@ export interface ArticleCreateInput {
   currency?: string;
   unit: string;
   quantity?: string;
+}
+
+export interface SupplierMatch {
+  supplier: Supplier;
+  score: number;
+  match_type: 'vat' | 'name';
+}
+
+export interface ArticleMatch {
+  article: Article;
+  score: number;
+  recommended: boolean;
+}
+
+export interface ArticleMatchLineInput {
+  index: number;
+  description: string;
 }
 
 // ============================================================================
@@ -306,6 +324,14 @@ export const suppliers = {
   count(): Promise<{ count: number }> {
     return apiFetch('/suppliers/count');
   },
+
+  /** Match an extracted vendor (name/VAT) against the org's supplier catalog. */
+  match(params: { name?: string; vatId?: string }): Promise<{ matches: SupplierMatch[] }> {
+    const qs = new URLSearchParams();
+    if (params.name) qs.set('name', params.name);
+    if (params.vatId) qs.set('vat_id', params.vatId);
+    return apiFetch(`/suppliers/match?${qs.toString()}`);
+  },
 };
 
 // ============================================================================
@@ -333,6 +359,17 @@ export const articles = {
 
   count(): Promise<{ count: number }> {
     return apiFetch('/articles/count');
+  },
+
+  /** Suggest catalog articles for a batch of order lines, scoped to one supplier. */
+  match(params: {
+    supplierId: string;
+    lines: ArticleMatchLineInput[];
+  }): Promise<{ matches: Record<string, ArticleMatch[]> }> {
+    return apiFetch('/articles/match', {
+      method: 'POST',
+      body: { supplierId: params.supplierId, lines: params.lines },
+    });
   },
 };
 
