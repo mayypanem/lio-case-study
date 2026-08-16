@@ -26,7 +26,7 @@ class ExtractedVendorData(BaseModel):
 
     title: str = ""
     vendor_name: str = Field(default="", alias="vendorName")
-    vat_id: str = Field(default="", alias="vatId")
+    vat_id: str | None = Field(default="", alias="vatId")
     department: str = ""
     order_lines: list[OrderLineData] = Field(default_factory=list, alias="orderLines")
     total_cost: float = Field(default=0, alias="totalCost")

@@ -10,6 +10,7 @@ import type {
 } from '@/types/database';
 
 export { ApiError, getToken, clearToken } from './client';
+export type { CommodityGroup };
 
 // ============================================================================
 // Types
@@ -47,6 +48,8 @@ export type ConfigurableRequiredField = 'vat_id' | 'department';
 
 export interface OrganizationSettings {
   required_fields: ConfigurableRequiredField[];
+  enable_commodity_group_mappings: boolean;
+  commodity_group_mappings?: Record<string, number>;
 }
 
 export interface MembersResponse {
