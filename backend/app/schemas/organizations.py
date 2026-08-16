@@ -21,6 +21,14 @@ class OrganizationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     required_fields: list[ConfigurableRequiredField] = Field(default_factory=list)
+    enable_commodity_group_mappings: bool = Field(
+        default=False,
+        description="Whether to apply custom commodity group mappings during extraction"
+    )
+    commodity_group_mappings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Maps keywords/article names to commodity group IDs for custom extraction classification"
+    )
 
 
 class OrganizationCreate(BaseModel):

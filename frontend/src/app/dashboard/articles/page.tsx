@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import * as api from '@/lib/api';
 import type { ArticlePage } from '@/lib/api';
-import { Input, Alert } from '@/components/base';
+import { Input, Alert, Button } from '@/components/base';
+import { ArticleCreationForm } from '@/components/ArticleCreationForm';
 
 const PAGE_SIZE = 25;
 
@@ -31,6 +32,7 @@ export default function ArticlesPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [offset, setOffset] = useState(0);
+  const [showForm, setShowForm] = useState(false);
 
   // Debounce the search box, and reset to the first page whenever it changes.
   useEffect(() => {
@@ -74,14 +76,30 @@ export default function ArticlesPage() {
   const hasPrev = offset > 0;
   const hasNext = offset + PAGE_SIZE < total;
 
+  const handleArticleCreated = () => {
+    setShowForm(false);
+    // Reload the current page
+    setOffset(0);
+    // Trigger reload by resetting debouncedSearch which will trigger the useEffect
+    setDebouncedSearch(debouncedSearch);
+  };
+
   return (
     <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-ink">Articles</h1>
-        <p className="text-ink/55 mt-1.5">
-          Your article catalog · {total.toLocaleString('de-DE')} articles
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight text-ink">Articles</h1>
+          <p className="text-ink/55 mt-1.5">
+            Your article catalog · {total.toLocaleString('de-DE')} articles
+          </p>
+        </div>
+        <Button
+          variant="accent"
+          onClick={() => setShowForm(true)}
+        >
+          + Add Article
+        </Button>
       </div>
 
       {error && <Alert variant="error" className="mb-6">{error}</Alert>}
@@ -176,6 +194,22 @@ export default function ArticlesPage() {
           </div>
         )}
       </div>
+
+      {/* Article Creation Modal */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-auto p-6">
+            <div className="mb-6">
+              <h2 className="text-2xl font-semibold text-ink">Create Article</h2>
+              <p className="text-ink/55 mt-1 text-sm">Add a new article to your catalog</p>
+            </div>
+            <ArticleCreationForm
+              onSuccess={handleArticleCreated}
+              onCancel={() => setShowForm(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

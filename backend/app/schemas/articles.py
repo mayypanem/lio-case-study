@@ -2,7 +2,19 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ArticleCreate(BaseModel):
+    """Input schema for creating a new article."""
+    
+    article_number: str
+    supplier_id: uuid.UUID
+    description: str
+    unit_price: float
+    currency: str = "EUR"
+    unit: str
+    quantity: float = 1.0
 
 
 class ArticleOut(BaseModel):

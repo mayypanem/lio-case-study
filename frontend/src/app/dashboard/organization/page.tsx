@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import * as api from '@/lib/api';
 import { Button, Input, Alert } from '@/components/base';
 import type { OrganizationMemberWithProfile, OrganizationInvite } from '@/types/database';
@@ -25,8 +26,10 @@ export default function OrganizationPage() {
   const [inviting, setInviting] = useState(false);
   const [organizationName, setOrganizationName] = useState<string>('');
   const [role, setRole] = useState<api.MemberRole | null>(null);
-  const [requiredFields, setRequiredFields] = useState<api.ConfigurableRequiredField[]>([]);
-  const [savingSettings, setSavingSettings] = useState(false);
+   const [requiredFields, setRequiredFields] = useState<api.ConfigurableRequiredField[]>([]);
+   const [enableCustomMappings, setEnableCustomMappings] = useState(false);
+   const [hasMappings, setHasMappings] = useState(false);
+   const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
     loadOrganization();
@@ -41,13 +44,17 @@ export default function OrganizationPage() {
       setOrganizationName(org.name);
       setRole(org.role);
 
-      const [result, settings] = await Promise.all([
-        api.organizations.getMembers(),
-        api.organizations.getSettings(),
-      ]);
-      setMembers(result.members);
-      setInvites(result.invites);
-      setRequiredFields(settings.required_fields);
+       const [result, settings] = await Promise.all([
+         api.organizations.getMembers(),
+         api.organizations.getSettings(),
+       ]);
+       setMembers(result.members);
+       setInvites(result.invites);
+        setRequiredFields(settings.required_fields);
+        const hasMappingsData = !!(settings.commodity_group_mappings && 
+          Object.keys(settings.commodity_group_mappings).length > 0);
+        setHasMappings(hasMappingsData);
+        setEnableCustomMappings(settings.enable_commodity_group_mappings);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load organization');
     }
@@ -94,24 +101,29 @@ export default function OrganizationPage() {
     { key: 'department', label: 'Department' },
   ];
 
-  const toggleRequiredField = async (field: api.ConfigurableRequiredField) => {
-    const next = requiredFields.includes(field)
-      ? requiredFields.filter((f) => f !== field)
-      : [...requiredFields, field];
-    setRequiredFields(next);
-    setSavingSettings(true);
-    setError('');
-    setSuccess('');
-    try {
-      const saved = await api.organizations.updateSettings({ required_fields: next });
-      setRequiredFields(saved.required_fields);
-      setSuccess('Settings updated');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update settings');
-      await loadOrganization(); // revert to server state
-    }
-    setSavingSettings(false);
-  };
+   const toggleRequiredField = async (field: api.ConfigurableRequiredField) => {
+     const next = requiredFields.includes(field)
+       ? requiredFields.filter((f) => f !== field)
+       : [...requiredFields, field];
+     setRequiredFields(next);
+     setSavingSettings(true);
+     setError('');
+     setSuccess('');
+     try {
+       const currentSettings = await api.organizations.getSettings();
+       const saved = await api.organizations.updateSettings({
+         required_fields: next,
+         enable_commodity_group_mappings: currentSettings.enable_commodity_group_mappings,
+         commodity_group_mappings: currentSettings.commodity_group_mappings,
+       });
+       setRequiredFields(saved.required_fields);
+       setSuccess('Settings updated');
+     } catch (err) {
+       setError(err instanceof Error ? err.message : 'Failed to update settings');
+       await loadOrganization(); // revert to server state
+     }
+     setSavingSettings(false);
+   };
 
   if (loading) {
     return (
@@ -266,34 +278,87 @@ export default function OrganizationPage() {
         </>
       )}
 
-      {tab === 'settings' && (
-        <div className="lio-card p-6">
-          <h2 className="text-xl font-semibold tracking-tight text-ink">Request Settings</h2>
-          <p className="text-sm text-ink/55 mt-1 mb-4">
-            Choose which optional fields are required when creating a request.
-          </p>
-          <div className="space-y-2">
-            {REQUIRABLE_FIELDS.map((field) => {
-              const checked = requiredFields.includes(field.key);
-              return (
-                <label
-                  key={field.key}
-                  className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 cursor-pointer hover:bg-ink-800/[0.02]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={savingSettings}
-                    onChange={() => toggleRequiredField(field.key)}
-                    className="h-4 w-4 accent-accent-deep"
-                  />
-                  <span className="text-sm text-ink">Require {field.label}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
+       {tab === 'settings' && (
+         <>
+           <div className="lio-card p-6 mb-6">
+             <h2 className="text-xl font-semibold tracking-tight text-ink">Request Settings</h2>
+             <p className="text-sm text-ink/55 mt-1 mb-4">
+               Choose which optional fields are required when creating a request.
+             </p>
+             <div className="space-y-2">
+               {REQUIRABLE_FIELDS.map((field) => {
+                 const checked = requiredFields.includes(field.key);
+                 return (
+                   <label
+                     key={field.key}
+                     className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 cursor-pointer hover:bg-ink-800/[0.02]"
+                   >
+                     <input
+                       type="checkbox"
+                       checked={checked}
+                       disabled={savingSettings}
+                       onChange={() => toggleRequiredField(field.key)}
+                       className="h-4 w-4 accent-accent-deep"
+                     />
+                     <span className="text-sm text-ink">Require {field.label}</span>
+                   </label>
+                 );
+               })}
+             </div>
+           </div>
+
+           <div className="lio-card p-6">
+             <h2 className="text-xl font-semibold tracking-tight text-ink mb-4">
+               Custom Commodity Mappings
+             </h2>
+              <label className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 cursor-pointer hover:bg-ink-800/[0.02]">
+                <input
+                  type="checkbox"
+                  checked={enableCustomMappings}
+                  disabled={savingSettings}
+                  onChange={(e) => {
+                    setEnableCustomMappings(e.target.checked);
+                    // Save the enable flag to the server
+                    (async () => {
+                      setSavingSettings(true);
+                      setError('');
+                      setSuccess('');
+                      try {
+                        // Get current settings to preserve mappings
+                        const currentSettings = await api.organizations.getSettings();
+                        await api.organizations.updateSettings({
+                          required_fields: requiredFields,
+                          enable_commodity_group_mappings: e.target.checked,
+                          commodity_group_mappings: currentSettings.commodity_group_mappings || {}
+                        });
+                        setSuccess(e.target.checked ? 'Custom mappings enabled' : 'Custom mappings disabled');
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : 'Failed to update settings');
+                        setEnableCustomMappings(!e.target.checked); // Revert
+                      }
+                      setSavingSettings(false);
+                    })();
+                  }}
+                  className="h-4 w-4 accent-accent-deep"
+                />
+                <span className="text-sm text-ink">
+                  Use custom commodity group mappings for this organization
+                </span>
+              </label>
+
+              {(enableCustomMappings || hasMappings) && (
+                <div className="mt-4">
+                  <Link
+                    href="/dashboard/organization/commodity-mappings"
+                    className="inline-flex px-4 py-2 rounded-lg bg-accent-deep text-white text-sm font-medium hover:bg-accent-deep/90 transition-colors"
+                  >
+                    Manage Custom Mappings
+                  </Link>
+                </div>
+              )}
+           </div>
+         </>
+       )}
     </div>
   );
 }

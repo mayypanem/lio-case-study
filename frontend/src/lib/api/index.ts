@@ -10,6 +10,7 @@ import type {
 } from '@/types/database';
 
 export { ApiError, getToken, clearToken } from './client';
+export type { CommodityGroup };
 
 // ============================================================================
 // Types
@@ -47,6 +48,8 @@ export type ConfigurableRequiredField = 'vat_id' | 'department';
 
 export interface OrganizationSettings {
   required_fields: ConfigurableRequiredField[];
+  enable_commodity_group_mappings: boolean;
+  commodity_group_mappings?: Record<string, number>;
 }
 
 export interface MembersResponse {
@@ -60,6 +63,8 @@ export interface OrderLineInput {
   amount: number;
   unit: string;
   totalPrice: number;
+  commodityGroupId?: number | null;
+  commodityGroupName?: string | null;
 }
 
 export interface CreateRequestInput {
@@ -132,6 +137,16 @@ export interface ArticlePage {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface ArticleCreateInput {
+  article_number: string;
+  supplier_id: string;
+  description: string;
+  unit_price: string;
+  currency?: string;
+  unit: string;
+  quantity?: string;
 }
 
 // ============================================================================
@@ -310,6 +325,10 @@ export const articles = {
     qs.set('limit', String(params?.limit ?? 25));
     qs.set('offset', String(params?.offset ?? 0));
     return apiFetch(`/articles?${qs.toString()}`);
+  },
+
+  create(data: ArticleCreateInput): Promise<Article> {
+    return apiFetch('/articles', { method: 'POST', body: data });
   },
 
   count(): Promise<{ count: number }> {
