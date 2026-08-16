@@ -139,6 +139,16 @@ export interface ArticlePage {
   offset: number;
 }
 
+export interface ArticleCreateInput {
+  article_number: string;
+  supplier_id: string;
+  description: string;
+  unit_price: string;
+  currency?: string;
+  unit: string;
+  quantity?: string;
+}
+
 // ============================================================================
 // Auth
 // ============================================================================
@@ -315,6 +325,10 @@ export const articles = {
     qs.set('limit', String(params?.limit ?? 25));
     qs.set('offset', String(params?.offset ?? 0));
     return apiFetch(`/articles?${qs.toString()}`);
+  },
+
+  create(data: ArticleCreateInput): Promise<Article> {
+    return apiFetch('/articles', { method: 'POST', body: data });
   },
 
   count(): Promise<{ count: number }> {

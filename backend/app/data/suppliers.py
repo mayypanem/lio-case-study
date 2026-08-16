@@ -124,4 +124,5 @@ SUPPLIERS: list[dict] = [
     {'name': 'Beacon Supply B.V.', 'description': '', 'category': 'Office & Administration', 'country': 'SE', 'vat_id': 'SE100094887', 'website': 'https://www.beaconsupply.example', 'email': 'contact@beaconsupply.example'},
     {'name': 'Beacon Systems S.A.', 'description': '', 'category': 'Information Technology', 'country': 'GB', 'vat_id': 'GB100095698', 'website': 'https://www.beaconsystems.example', 'email': 'contact@beaconsystems.example'},
     {'name': 'Beacon Logistik GmbH', 'description': '', 'category': 'Logistics', 'country': 'PL', 'vat_id': 'PL100096509', 'website': 'https://www.beaconlogistik.example', 'email': 'contact@beaconlogistik.example'},
+    {'name': 'Hoffmann Nurnberg GmbH Qualitatswerkzeuge', 'description': '', 'category': 'Maintenance, Repair & Operations', 'country': 'DE', 'vat_id': 'DE100097320', 'website': 'https://www.hoffmannnurnberg.example', 'email': 'contact@hoffmannnurnberg.example'},
 ]

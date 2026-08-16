@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.deps import get_current_membership
 from app.db.session import get_db
 from app.models import Article, OrganizationMember
-from app.schemas.articles import ArticleOut, ArticlePage
+from app.schemas.articles import ArticleCreate, ArticleOut, ArticlePage
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 
@@ -74,3 +74,42 @@ def count_articles(
         or 0
     )
     return {"count": total}
+
+
+@router.post("", response_model=ArticleOut, status_code=status.HTTP_201_CREATED)
+def create_article(
+    payload: ArticleCreate,
+    membership: OrganizationMember = Depends(get_current_membership),
+    db: Session = Depends(get_db),
+) -> ArticleOut:
+    """Create a new article in the organization's catalog."""
+    # Create the article with the organization context
+    article = Article(
+        organization_id=membership.organization_id,
+        article_number=payload.article_number,
+        supplier_id=payload.supplier_id,
+        description=payload.description,
+        unit_price=payload.unit_price,
+        currency=payload.currency,
+        unit=payload.unit,
+        quantity=payload.quantity,
+    )
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+    
+    # Load the supplier relationship for the response
+    db.refresh(article, ["supplier"])
+    
+    return ArticleOut(
+        id=article.id,
+        article_number=article.article_number,
+        supplier_id=article.supplier_id,
+        supplier_name=article.supplier.name if article.supplier else None,
+        description=article.description,
+        unit_price=article.unit_price,
+        currency=article.currency,
+        unit=article.unit,
+        quantity=article.quantity,
+        created_at=article.created_at,
+    )
