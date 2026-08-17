@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import uuid
 
 from openai import OpenAI
@@ -42,52 +43,55 @@ class _ItemOverridesResponse(BaseModel):
 
 
 def _build_baseline_prompt(pdf_text: str, commodity_groups_list: str) -> str:
-    """Prompt for the baseline extraction + classification call.
+     """Prompt for the baseline extraction + classification call.
 
-    This prompt intentionally contains NO mention of organization-specific
-    custom mappings. Keeping the two concerns in separate LLM calls guarantees
-    the request-level classification can never be influenced by a per-item
-    custom-mapping override, since the override keywords are never present in
-    this call's context at all.
-    """
-    return f"""You are a data extraction and classification specialist. Extract procurement/vendor offer information from the following German document text AND classify it into the appropriate commodity group.
+     This prompt intentionally contains NO mention of organization-specific
+     custom mappings. Keeping the two concerns in separate LLM calls guarantees
+     the request-level classification can never be influenced by a per-item
+     custom-mapping override, since the override keywords are never present in
+     this call's context at all.
+     """
+     return f"""You are a data extraction and classification specialist. Extract procurement/vendor offer information from the following German document text AND classify it into the appropriate commodity group.
 
-Document Text:
-{pdf_text}
+ Document Text:
+ {pdf_text}
 
-Please extract the following information:
-1. Title/Short Description (A brief summary of what this procurement is for - e.g., "Office Equipment Purchase", "Software Licenses", etc.)
-2. Vendor Name (Lieferant/Anbieter/Firma/Company name)
-3. VAT ID (Umsatzsteuer-Identifikationsnummer/VAT ID/USt-IdNr/Tax ID)
-4. Department/Customer (Abteilung/Kunde/Offered to/Customer name)
-5. Total Cost (Gesamtsumme/Total Cost/Total Offer Cost)
-6. Overall Commodity Group Classification for the request - Select ONE commodity group that best represents the offer AS A WHOLE (its primary/dominant nature).
-7. Order Lines/Items (All line items with):
-   - Position Description (Bezeichnung/Product/Item/Artikel)
-   - Unit Price (Einzelpreis/Unit Price/Preis/Price per unit)
-   - Amount (Menge/Quantity/Anzahl)
-   - Unit (Einheit/Unit/ME - e.g., "licenses", "pieces", "Stück", "items")
-   - Total Price (Gesamtpreis/Total/Gesamt)
-   - Commodity Group ID & Name for THIS ITEM (see Step 8 below)
-8. Commodity Group Classification for each item - Select the most appropriate commodity group for EACH item from the list below. Every item MUST be assigned a commodity group ID — do not leave any item's commodityGroupId null.
+ Please extract the following information:
+ 1. Title/Short Description (A brief summary of what this procurement is for - e.g., "Office Equipment Purchase", "Software Licenses", etc.)
+ 2. Vendor Name (Lieferant/Anbieter/Firma/Company name - this is the SUPPLIER/VENDOR, not the recipient/customer)
+ 3. VAT ID (Umsatzsteuer-Identifikationsnummer/VAT ID/USt-IdNr/Tax ID of the vendor/supplier)
+ 4. Department/Customer (Abteilung/Kunde/Offered to/Customer name - the internal department or recipient, not the vendor)
+ 5. Total Cost (Gesamtsumme/Total Cost/Total Offer Cost - DO NOT include VAT/tax rows in this total; sum only the product/service items)
+ 6. Overall Commodity Group Classification for the request - Select ONE commodity group that best represents the offer AS A WHOLE (its primary/dominant nature).
+ 7. Order Lines/Items (All line items with):
+    - Position Description (Bezeichnung/Product/Item/Artikel)
+    - Unit Price (Einzelpreis/Unit Price/Preis/Price per unit)
+    - Amount (Menge/Quantity/Anzahl)
+    - Unit (Einheit/Unit/ME - e.g., "licenses", "pieces", "Stück", "items")
+    - Total Price (Gesamtpreis/Total/Gesamt)
+    - Commodity Group ID & Name for THIS ITEM (see Step 8 below)
+ 8. Commodity Group Classification for each item - Select the most appropriate commodity group for EACH item from the list below. Every item MUST be assigned a commodity group ID — do not leave any item's commodityGroupId null.
 
-Available Commodity Groups (ID | Category | Name):
-{commodity_groups_list}
+ Available Commodity Groups (ID | Category | Name):
+ {commodity_groups_list}
 
-IMPORTANT INSTRUCTIONS:
-- For the title, create a SHORT (2-5 words) description based on the main items being purchased
-- Extract ALL line items, even if there are many
-- For unit prices and totals, extract only the numeric value (remove currency symbols)
-- For the unit field, translate German terms to English (e.g., "Stück" -> "pieces", "Lizenzen" -> "licenses")
-- Be careful with German number formatting (e.g., "1.438,00" = 1438.00)
-- For commodity group classification of each item (Step 8), consider its PRIMARY nature and purpose:
-  * Branded office decor/furniture → Office Equipment (15)
-  * Traditional promotional items (brochures, giveaways, banners) → Promotional Materials (43)
-  * Software/IT products → Software (31) or IT Services (30)
-  * Every item must get a commodityGroupId — pick the closest match even if uncertain, never leave it null
-- The overall request-level commodity group (Step 6) reflects the offer as a whole; the per-item groups (Step 8) reflect each individual line — these are two separate, independent decisions and do not need to match each other
+ IMPORTANT INSTRUCTIONS:
+ - For the title, create a SHORT (2-5 words) description based on the main items being purchased
+ - EXCLUDE VAT/tax/regulatory fee rows (e.g., "MwSt.", "Umsatzsteuer", "Urheberrechtsabgabe") from the order lines — these are not products/services and clutter the data. Only include actual product/service items.
+ - Extract ONLY the genuine product/service line items; skip lines that describe taxes, fees, or adjustments
+ - For unit prices and totals, extract only the numeric value (remove currency symbols)
+ - For the unit field, translate German terms to English (e.g., "Stück" -> "pieces", "Lizenzen" -> "licenses")
+ - Be careful with German number formatting (e.g., "1.438,00" = 1438.00, "1,28" = 1.28)
+ - IMPORTANT: unitPrice × amount MUST equal totalPrice. If the document shows inconsistent values, use the most reliable calculation (prefer unitPrice × amount over a potentially wrong totalPrice from the document)
+ - For commodity group classification of each item (Step 8), consider its PRIMARY nature and purpose:
+   * Branded office decor/furniture → Office Equipment (15)
+   * Traditional promotional items (brochures, giveaways, banners) → Promotional Materials (43)
+   * Software/IT products → Software (31) or IT Services (30)
+   * Delivery/installation/service lines → Services (see category, pick the closest match)
+   * Every item must get a commodityGroupId — pick the closest match even if uncertain, never leave it null
+ - The overall request-level commodity group (Step 6) reflects the offer as a whole; the per-item groups (Step 8) reflect each individual line — these are two separate, independent decisions and do not need to match each other
 
-Return ONLY valid JSON in this exact format (no markdown, no code blocks):
+ Return ONLY valid JSON in this exact format (no markdown, no code blocks):
 {{
   "title": "Short description of procurement",
   "vendorName": "Company Name",
@@ -157,15 +161,35 @@ Return ONLY valid JSON in this exact format (no markdown, no code blocks). Inclu
 }}"""
 
 
+def _is_tax_or_fee_line(description: str) -> bool:
+    """Detect if a line is a tax/fee/adjustment and should be filtered out."""
+    lower = description.lower().strip()
+    tax_keywords = {
+        'mwst', 'umsatzsteuer', 'vat', 'sales tax', 'steuern', 'tax',
+        'urheberrechtsabgabe', 'copyright fee', 'gebühr', 'fee',
+        'mehrwertsteuer', 'inkasso', 'collection fee', 'versand', 'shipping',
+        'versandkosten', 'rabatt', 'discount', 'skonto', 'nachlass',
+        'bearbeitungsgebühr', 'processing fee'
+    }
+    return any(keyword in lower for keyword in tax_keywords)
+
+
+def _recalculate_line_price(line) -> None:
+    """Recalculate totalPrice = unitPrice × amount to ensure consistency."""
+    # Recalculate the total price to guarantee it's consistent with unit price and amount
+    if line.unit_price and line.amount:
+        line.total_price = round(line.unit_price * line.amount, 2)
+
+
 def _strip_markdown_fences(content: str) -> str:
-    cleaned = content.strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned.removeprefix("```json").strip()
-    elif cleaned.startswith("```"):
-        cleaned = cleaned.removeprefix("```").strip()
-    if cleaned.endswith("```"):
-        cleaned = cleaned.removesuffix("```").strip()
-    return cleaned
+     cleaned = content.strip()
+     if cleaned.startswith("```json"):
+         cleaned = cleaned.removeprefix("```json").strip()
+     elif cleaned.startswith("```"):
+         cleaned = cleaned.removeprefix("```").strip()
+     if cleaned.endswith("```"):
+         cleaned = cleaned.removesuffix("```").strip()
+     return cleaned
 
 
 def _get_item_overrides(
@@ -267,30 +291,62 @@ def extract_vendor_data(
 
     client = OpenAI(api_key=settings.openai_api_key)
 
-    try:
-        response = client.chat.completions.create(
-            model=settings.openai_model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": _build_baseline_prompt(pdf_text, commodity_groups_list),
-                },
-            ],
-            max_completion_tokens=4000,
-            temperature=0.3,
-        )
+    # Retry mechanism with exponential backoff (up to 3 attempts)
+    max_attempts = 3
+    last_error = None
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = client.chat.completions.create(
+                model=settings.openai_model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": _build_baseline_prompt(pdf_text, commodity_groups_list),
+                    },
+                ],
+                max_completion_tokens=4000,
+                temperature=0.3,
+            )
 
-        content = response.choices[0].message.content
-        if not content:
-            return ExtractionResponse(success=False, error="Empty response from AI")
+            content = response.choices[0].message.content
+            if not content:
+                last_error = "Empty response from AI"
+                if attempt < max_attempts:
+                    wait_time = 2 ** (attempt - 1)  # 1s, 2s, 4s
+                    logger.warning(
+                        "Empty response from AI on attempt %d/%d, retrying in %ds",
+                        attempt,
+                        max_attempts,
+                        wait_time,
+                    )
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return ExtractionResponse(success=False, error=last_error)
 
-        extracted = ExtractedVendorData.model_validate(
-            json.loads(_strip_markdown_fences(content))
-        )
-    except Exception as exc:  # noqa: BLE001 — mirror the original catch-all
-        logger.exception("Error extracting vendor data")
-        return ExtractionResponse(success=False, error=str(exc))
+            extracted = ExtractedVendorData.model_validate(
+                json.loads(_strip_markdown_fences(content))
+            )
+            # Success — break out of retry loop
+            break
+
+        except Exception as exc:  # noqa: BLE001 — mirror the original catch-all
+            last_error = str(exc)
+            if attempt < max_attempts:
+                wait_time = 2 ** (attempt - 1)  # 1s, 2s, 4s
+                logger.warning(
+                    "Extraction attempt %d/%d failed: %s. Retrying in %ds",
+                    attempt,
+                    max_attempts,
+                    exc,
+                    wait_time,
+                )
+                time.sleep(wait_time)
+            else:
+                logger.exception("Error extracting vendor data after %d attempts", max_attempts)
+                return ExtractionResponse(success=False, error=last_error)
 
     # Check which fields are missing or empty (same rules as the original).
     missing_fields: list[str] = []
@@ -346,6 +402,29 @@ def extract_vendor_data(
             group = commodity_group_map[line.commodity_group_id]
             line.commodity_group_name = group.name
 
+    # --- POST-PROCESSING: Filter and validate extracted data ---
+    
+    # 1. Filter out tax/fee/adjustment lines and recalculate prices for remaining lines
+    cleaned_lines = []
+    for line in extracted.order_lines:
+        # Skip VAT/tax/regulatory fee rows
+        if _is_tax_or_fee_line(line.position_description):
+            logger.debug("Filtered out tax/fee line: %s", line.position_description)
+            continue
+        
+        # Recalculate total price to ensure consistency with unit price and amount
+        _recalculate_line_price(line)
+        
+        cleaned_lines.append(line)
+    
+    extracted.order_lines = cleaned_lines
+    
+    # 2. Recalculate request-level total cost from the cleaned order lines
+    # (instead of trusting the AI's extraction which may have included taxes)
+    if extracted.order_lines:
+        recalculated_total = sum(line.total_price for line in extracted.order_lines)
+        extracted.total_cost = round(recalculated_total, 2)
+    
     # Apply organization-specific custom mapping overrides via a fully
     # isolated second call. This can only ever change extracted.order_lines
     # entries — it has no way to touch extracted.commodity_group_id/_name.
